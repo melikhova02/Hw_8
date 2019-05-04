@@ -1,0 +1,134 @@
+---
+title: "Лабораторная_8"
+output:
+  html_document:
+    df_print: paged
+  html_notebook: default
+  pdf_document: default
+  word_document: default
+---
+## Математическое моделирование
+
+### Практика 8
+
+### Модели на основе деревьев      
+
+В практических примерах ниже показано как:   
+
+* строить регрессионные деревья;    
+* строить деревья классификации;   
+* делать обрезку дерева;    
+* использовать бэггинг, бустинг, случайный лес для улучшения качества прогнозирования.    
+
+*Модели*: деревья решений.   
+*Данные*: `Sales {ISLR}`, `Boston {MASS}`   
+
+
+```{r}
+# Загрузка пакетов
+library('tree')              # деревья tree()
+library('ISLR')              # набор данных Carseats
+library('GGally')            # матричный график разброса ggpairs()
+library('MASS')              # набор данных Boston
+library('randomForest')      # случайный лес randomForest()
+library('gbm')               # бустинг gbm()
+```
+
+```{r}
+data(Boston) # открываем данные
+high.medv <- ifelse(Boston$medv <= 25, "0", "1")
+# присоединяем к таблице данных
+Boston <- cbind(Boston, high.medv)
+# ядро генератора случайных чисел
+my.seed <- 3
+set.seed(my.seed)
+train <- sample(1:nrow(Boston), nrow(Boston)/2) # обучающая выборка -- 50%
+```
+
+```{r}
+p <- ggpairs(Boston[, c(14, 1:4)])
+suppressMessages(print(p))
+p <- ggpairs(Boston[, c(14, 5:8)])
+suppressMessages(print(p))
+p <- ggpairs(Boston[, c(14, 9:13)])
+suppressMessages(print(p))
+```
+
+```{r}
+tree.boston <- tree(high.medv ~ ., Boston, subset = train)
+summary(tree.boston)
+# визуализация
+plot(tree.boston)
+text(tree.boston, pretty = 0)
+```
+
+Снова сделаем обрезку дерева в целях улучшения качества прогноза.    
+
+```{r, cache = T}
+# обрезка дерева
+cv.boston <- cv.tree(tree.boston)
+```
+
+```{r, cache = T}
+# размер дерева с минимальной ошибкой
+plot(cv.boston$size, cv.boston$dev, type = 'b')
+opt.size <- cv.boston$size[cv.boston$dev == min(cv.boston$dev)]
+abline(v = opt.size, col = 'red', 'lwd' = 2)     # соотв. вертикальная прямая
+mtext(opt.size, at = opt.size, side = 1, col = 'red', line = 1)
+```
+
+В данном случаем минимум ошибки соответствует дереву с 2 узлами. 
+Сделаем прогноз и рассчитаем MSE.
+
+```{r}
+# обучающая выборка
+yhat <- predict(tree.boston, newdata=Boston[-train, ])
+# прогноз по лучшей модели (2 узлами)
+boston.test <- Boston[-train, "high.medv"]
+mse.test <- mean((yhat - train)^2)
+mse.test
+```
+
+## Метод случайного леса    
+
+Рассмотрим более сложные методы улучшения качества дерева. Бэггинг -- частный случай случайного леса с $m = p$, поэтому и то, и другое можно построить функцией `randomForest()`.    
+
+Для начала используем *бэггинг*, причём возьмём все 14 предикторов на каждом шаге (аргумент `mtry`).   
+
+```{r, cache = T}
+# бэггинг с 14 предикторами
+boston.test <- Boston[-train,]
+set.seed(my.seed)
+bag.Boston <- randomForest(high.medv ~ ., data = Boston, subset = train, 
+                           mtry = 14, importance = TRUE)
+bag.Boston
+# прогноз
+yhat.bag = predict(bag.Boston, newdata = Boston[-train, ])
+yhat.bag
+```
+
+ 
+Можно изменить число деревьев с помощью аргумента `ntree`.   
+
+```{r, cache = T}
+# бэггинг с 13 предикторами и 25 деревьями
+bag.Boston <- randomForest(high.medv ~ ., data = Boston, subset = train,
+                           mtry = 13, ntree = 25)
+# прогноз
+yhat.bag <- predict(bag.Boston, newdata = Boston[-train, ])
+yhat.bag
+```
+
+Теперь попробуем вырастить случайный лес. Берём 6 предикторов на каждом шаге.   
+
+```{r, cache = T}
+# обучаем модель
+set.seed(my.seed)
+rf.boston <- randomForest(high.medv ~ ., data = Boston, subset = train,
+                          mtry = 6, importance = TRUE)
+# важность предикторов
+importance(rf.boston)  # оценки 
+varImpPlot(rf.boston)  # графики
+```
+
+По полученным данным можно сделать вывод о том, что наибольшее влияние в модели оказывают такие показатели, как medv (средняя стоимость домов, занимаемых владельцами, в 1000 долларов) и  rm (среднее количество комнат в доме).
